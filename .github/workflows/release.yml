@@ -1,0 +1,85 @@
+name: Release
+
+# Publishes a release automatically when main contains a new version:
+#   1. bump `version` in main.go
+#   2. add docs/releases/vX.Y.Z.md (the release notes; required, so nothing
+#      is ever released by accident)
+#   3. push to main
+# The workflow tests, builds, tags vX.Y.Z and publishes the release with the
+# OnionOS zip attached. If that version is already released, it does nothing.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TOOLCHAIN: ${{ github.workspace }}/../miyoomini-toolchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide whether to release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(grep -o 'const version = "[^"]*"' main.go | cut -d'"' -f2)
+          TAG="v$V"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$TAG" ]; then
+            echo "::error::main.go says $V but the tag is $GITHUB_REF_NAME"; exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — nothing to do."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          elif [ ! -f "docs/releases/$TAG.md" ]; then
+            echo "No docs/releases/$TAG.md yet — not releasing."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Releasing $TAG."
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.check.outputs.go == 'true'
+        with:
+          go-version: "1.24"
+
+      - name: Cache the Miyoo Mini toolchain
+        if: steps.check.outputs.go == 'true'
+        id: tc
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../miyoomini-toolchain
+          key: miyoomini-toolchain-v0.0.3
+
+      - name: Download the Miyoo Mini toolchain (for the sound helper)
+        if: steps.check.outputs.go == 'true' && steps.tc.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL https://github.com/shauninman/miyoomini-toolchain-buildroot/releases/download/v0.0.3/miyoomini-toolchain.tar.xz \
+            | tar xJ -C "$GITHUB_WORKSPACE/.."
+
+      - name: Test and build
+        if: steps.check.outputs.go == 'true'
+        run: ./build.sh
+
+      - name: Publish
+        if: steps.check.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.check.outputs.tag }}
+        run: |
+          ZIP="dist/ROMRoulette-${TAG}-OnionOS.zip"
+          test -f "$ZIP"
+          gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" \
+            --title "ROM Roulette $TAG" --notes-file "docs/releases/$TAG.md"

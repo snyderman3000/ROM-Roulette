@@ -1,0 +1,6 @@
+{
+  "label": "ROM Roulette",
+  "icon": "/mnt/SDCARD/App/ROMRoulette/icon.png",
+  "launch": "launch.sh",
+  "description": "Spin the reel and play a random game from your card"
+}

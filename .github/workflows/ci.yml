@@ -1,0 +1,41 @@
+name: CI
+
+# Runs the tests and builds the OnionOS package on every push to main,
+# so a broken build shows up before anything is released.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TOOLCHAIN: ${{ github.workspace }}/../miyoomini-toolchain
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Cache the Miyoo Mini toolchain
+        id: tc
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/../miyoomini-toolchain
+          key: miyoomini-toolchain-v0.0.3
+      - name: Download the Miyoo Mini toolchain (for the sound helper)
+        if: steps.tc.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL https://github.com/shauninman/miyoomini-toolchain-buildroot/releases/download/v0.0.3/miyoomini-toolchain.tar.xz \
+            | tar xJ -C "$GITHUB_WORKSPACE/.."
+      - name: Test and build
+        run: ./build.sh
+      - name: Keep the package for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: romroulette-onionos
+          path: dist/*.zip
+          retention-days: 14
